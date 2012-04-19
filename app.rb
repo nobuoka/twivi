@@ -3,11 +3,14 @@
 
 # 参考 : http://codezine.jp/article/detail/2180
 
+$LOAD_PATH.unshift File.join( File.dirname(__FILE__), 'lib' )
 $LOAD_PATH.unshift File.join( File.dirname(__FILE__), 'modules', 'OAuthSimple', 'lib' )
 
 require 'json'
 require 'curses'
 require 'oauth_simple'
+
+require 'twivi/worker'
 #require "editwind"
 #require "commandwind"
 # [追加]
@@ -19,14 +22,6 @@ oauth_credentials_file_name = 'config/oauth_credentials.json'
 # preparing OAuth credentials
 json_str = File.read( File.join( File.dirname(__FILE__), oauth_credentials_file_name ) )
 credentials_json = JSON.parse( json_str )
-client_credentials = credentials_json['client_credentials']
-user_credentials   = credentials_json['user_credentials'  ]
-
-# OAuthSimple::HTTP is a subclass of Net::HTTP
-MyHTTP = OAuthSimple::HTTP.create_subclass_with_default_oauth_params()
-MyHTTP.set_default_oauth_client_credentials( *client_credentials )
-MyHTTP.set_default_oauth_user_credentials( *user_credentials )
-MyHTTP.set_default_oauth_signature_method( 'HMAC-SHA1' )
 
 class Status
   def initialize( text )
@@ -91,7 +86,7 @@ class View
     #edit_wind = EditWind.new(defo_wind)
     # デフォルトウィンドウの高さを少し小さくしたサブウィンドウを作成
     sub_wind = win.subwin( #win.maxy - 3, win.maxx - 4, 0, 0 )
-                          9, win.maxx - 4, 1, 1 )
+                          win.maxy - 4, win.maxx - 4, 1, 1 )
     win.box( '|', '-' )
     # スクロール機能をONにする
     sub_wind.scrollok(true)
@@ -109,12 +104,14 @@ class View
     @sub_win = sub_wind
   end
   def notify( model )
+    @sub_win.clear
     statuses = model.get_data
     # 画面更新処理
     line_num = 0
     statuses.each do |status|
       @sub_win.setpos( line_num, 0 )
-      @sub_win.addstr( status.text + "\n" )
+      @sub_win.addstr( status.text )
+      line_num = @sub_win.cury
       line_num += 1
     end
     @sub_win.refresh
@@ -125,46 +122,6 @@ class View
   end
 end
 
-class Worker
-  def initialize( data_manager )
-    @c = 'あ'
-    @data_manager = data_manager
-    @going_to_end = false
-    host = 'userstream.twitter.com'
-    path = '/2/user.json'
-    http = MyHTTP.new( host, 443)
-    http.use_ssl = true
-    #http.ca_file = 'GTE_CyberTrust_Global_Root.pem'
-    http.verify_mode  = OpenSSL::SSL::VERIFY_PEER
-    http.verify_depth = 5
-    @t = Thread.new do
-      begin
-        http.start() do |http|
-          http.request_get( path ) do |res|
-            res.read_body do |dat|
-              break if @going_to_end
-              @data_manager.add_status( Status.new( dat.to_s ) )
-            end
-            break
-          end
-        end
-        #while true
-        #  sleep 0.5
-        #  break if @going_to_end
-        #  @data_manager.add_status( Status.new( Time.now.to_s ) )
-        #end
-      rescue => err
-        p err
-        p err.backtrace
-      end
-    end
-  end
-  def finalize
-    @going_to_end = true
-    @t.wakeup
-  end
-end
-
 class App
 
   # 状態定数
@@ -172,11 +129,11 @@ class App
   ST_FINALIZING = 4
   ST_FINALIZED  = 5
 
-  def initialize
+  def initialize( credentials_json )
     @status = ST_RUNNING
 
     @data_manager = DataManager.new
-    @worker = Worker.new( @data_manager )
+    @worker = Twivi::Worker.new( @data_manager, credentials_json )
     @view   = View.new( @data_manager )
 
   end
@@ -198,7 +155,7 @@ stopper = Thread.new do
 end
 # TODO stopper が止まるまで待つ
 
-app = App.new
+app = App.new( credentials_json )
 Signal.trap( :INT ) { app.finalize; stopper.wakeup }
 
 stopper.join
