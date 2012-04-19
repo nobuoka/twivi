@@ -1,0 +1,3 @@
+[submodule "modules/OAuthSimple"]
+	path = modules/OAuthSimple
+	url = https://github.com/nobuoka/ruby-OAuthSimple.git

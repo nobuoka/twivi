@@ -1,16 +1,169 @@
+#! ruby -EUTF-8:UTF-8
 # coding: UTF-8
 
 # 参考 : http://codezine.jp/article/detail/2180
 
-require "curses"
+$LOAD_PATH.unshift File.join( File.dirname(__FILE__), 'modules', 'OAuthSimple', 'lib' )
+
+require 'json'
+require 'curses'
+require 'oauth_simple'
 #require "editwind"
 #require "commandwind"
 # [追加]
 #require "handler"
 
-class DataManager; end
-class Worker; def initialize( a ); end end
-class View;   def initialize( a ); end end
+# OAuth の credentials の設定を書いたファイル
+oauth_credentials_file_name = 'config/oauth_credentials.json'
+
+# preparing OAuth credentials
+json_str = File.read( File.join( File.dirname(__FILE__), oauth_credentials_file_name ) )
+credentials_json = JSON.parse( json_str )
+client_credentials = credentials_json['client_credentials']
+user_credentials   = credentials_json['user_credentials'  ]
+
+# OAuthSimple::HTTP is a subclass of Net::HTTP
+MyHTTP = OAuthSimple::HTTP.create_subclass_with_default_oauth_params()
+MyHTTP.set_default_oauth_client_credentials( *client_credentials )
+MyHTTP.set_default_oauth_user_credentials( *user_credentials )
+MyHTTP.set_default_oauth_signature_method( 'HMAC-SHA1' )
+
+class Status
+  def initialize( text )
+    @text = text
+  end
+  def text; @text end
+end
+class Model
+  def initialize( data_manager )
+    @data_manager = data_manager
+  end
+
+  class LatestStatuses < Model
+    def initialize( data_manager, num_statuses )
+      super( data_manager )
+      @listeners = []
+      @num_statuses = num_statuses
+    end
+    def on_change_data
+      @data = nil
+      @listeners.each{ |e| e.notify( self ) }
+    end
+    def get_data
+      @data ||= @data_manager.get_latest_statuses( @num_statuses )
+    end
+    def add_change_listener( listener )
+      @listeners << listener
+    end
+  end
+end
+
+class DataManager
+  def initialize
+    @statuses = []
+  end
+  def add_status( status )
+    @statuses << status
+    @model_latest_statuses.on_change_data if @model_latest_statuses
+  end
+  def get_latest_statuses( num_statuses )
+    e = @statuses.length
+    s = e - num_statuses
+    if s < 0 then s = 0 end
+    @statuses[s,e]
+  end
+  def get_model_latest_statuses
+    @model_latest_statuses ||= Model::LatestStatuses.new( self, 20 )
+  end
+end
+
+class View
+  def initialize( data_manager )
+    model = data_manager.get_model_latest_statuses
+    model.add_change_listener( self )
+    Curses.init_screen
+    #コンソール画面を初期化し初期設定を行う
+    Curses.cbreak
+    Curses.noecho
+    # デフォルトウィンドウを取得
+    win = Curses.stdscr
+    # 編集エリアウィンドウを作成
+    #edit_wind = EditWind.new(defo_wind)
+    # デフォルトウィンドウの高さを少し小さくしたサブウィンドウを作成
+    sub_wind = win.subwin( #win.maxy - 3, win.maxx - 4, 0, 0 )
+                          9, win.maxx - 4, 1, 1 )
+    win.box( '|', '-' )
+    # スクロール機能をONにする
+    sub_wind.scrollok(true)
+    #sub_wind.box( '|', '-' )
+
+    30.times do |i|
+      sub_wind.setpos(1, 0)
+      sub_wind.addstr('test 日本語 : ' + i.to_s)
+      sub_wind.scroll
+    end
+    sub_wind.setpos(5, 0)
+    sub_wind.addstr( sub_wind.class.inspect )
+    #ch = sub_wind.getch #１文字入力。
+    win.refresh
+    @sub_win = sub_wind
+  end
+  def notify( model )
+    statuses = model.get_data
+    # 画面更新処理
+    line_num = 0
+    statuses.each do |status|
+      @sub_win.setpos( line_num, 0 )
+      @sub_win.addstr( status.text + "\n" )
+      line_num += 1
+    end
+    @sub_win.refresh
+  end
+  def finalize
+    #コンソール画面を終了
+    Curses.close_screen
+  end
+end
+
+class Worker
+  def initialize( data_manager )
+    @c = 'あ'
+    @data_manager = data_manager
+    @going_to_end = false
+    host = 'userstream.twitter.com'
+    path = '/2/user.json'
+    http = MyHTTP.new( host, 443)
+    http.use_ssl = true
+    #http.ca_file = 'GTE_CyberTrust_Global_Root.pem'
+    http.verify_mode  = OpenSSL::SSL::VERIFY_PEER
+    http.verify_depth = 5
+    @t = Thread.new do
+      begin
+        http.start() do |http|
+          http.request_get( path ) do |res|
+            res.read_body do |dat|
+              break if @going_to_end
+              @data_manager.add_status( Status.new( dat.to_s ) )
+            end
+            break
+          end
+        end
+        #while true
+        #  sleep 0.5
+        #  break if @going_to_end
+        #  @data_manager.add_status( Status.new( Time.now.to_s ) )
+        #end
+      rescue => err
+        p err
+        p err.backtrace
+      end
+    end
+  end
+  def finalize
+    @going_to_end = true
+    @t.wakeup
+  end
+end
 
 class App
 
@@ -26,29 +179,6 @@ class App
     @worker = Worker.new( @data_manager )
     @view   = View.new( @data_manager )
 
-    Curses.init_screen
-    #コンソール画面を初期化し初期設定を行う
-    Curses.cbreak
-    Curses.noecho
-    # デフォルトウィンドウを取得
-    win = Curses.stdscr
-    # 編集エリアウィンドウを作成
-    #edit_wind = EditWind.new(defo_wind)
-    # デフォルトウィンドウの高さを少し小さくしたサブウィンドウを作成
-    sub_wind = win.subwin( #win.maxy - 3, win.maxx - 4, 0, 0 )
-                          9, win.maxx - 4, 0, 0 )
-    # スクロール機能をONにする
-    sub_wind.scrollok(true)
-
-    30.times do |i|
-      sub_wind.setpos(1, 0)
-      sub_wind.addstr('test 日本語 : ' + i.to_s)
-      sub_wind.scroll
-    end
-    sub_wind.setpos(5, 0)
-    sub_wind.addstr('test 日本語ああああああああああああああああああああああああああああああああaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ')
-    #ch = sub_wind.getch #１文字入力。
-    win.refresh
   end
 
   def finalize
@@ -56,8 +186,8 @@ class App
       return
     end
     @status = ST_FINALIZING
-    #コンソール画面を終了
-    Curses.close_screen
+    @worker.finalize
+    @view.finalize
     @status = ST_FINALIZED
   end
 
