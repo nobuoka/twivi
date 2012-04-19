@@ -89,19 +89,47 @@ class View
                           win.maxy - 4, win.maxx - 4, 1, 1 )
     win.box( '|', '-' )
     # スクロール機能をONにする
-    sub_wind.scrollok(true)
-    #sub_wind.box( '|', '-' )
+    sub_wind.scrollok( true )
+    sub_wind.box( '|', '-' )
 
-    30.times do |i|
-      sub_wind.setpos(1, 0)
-      sub_wind.addstr('test 日本語 : ' + i.to_s)
-      sub_wind.scroll
+    sub_wind.clear
+    line_num = 0
+    60.times do |i|
+      sub_wind.setpos( line_num, 0 )
+      sub_wind.addstr( 'test 日本語 : ' + i.to_s + "\n" )
+      line_num = sub_wind.cury
     end
+    sub_wind.refresh
     sub_wind.setpos(5, 0)
     sub_wind.addstr( sub_wind.class.inspect )
-    #ch = sub_wind.getch #１文字入力。
+
+    form_win = win.subwin( 2, win.maxx - 2, win.maxy - 3, 1 )
+    form_win.setpos( 0, 0 )
+    form_win.addstr( '入力蘭です' )
+    form_win.refresh
+    #Thread.new do
+    #  100.times do
+    #    sleep 5
+    #    form_win.addstr( 'test' )
+    #    form_win.refresh
+    #  end
+    #end
+
     win.refresh
     @sub_win = sub_wind
+    while true
+      ch = sub_wind.getch #１文字入力。
+      case ch
+      when ?j
+        sub_wind.scrl( 1 )
+      when ?k
+        sub_wind.scrl( -1 )
+      when ?q
+        break
+      when 'あ'
+        sub_wind.scrl( 5 )
+      end
+    end
   end
   def notify( model )
     @sub_win.clear
