@@ -1,5 +1,6 @@
 # coding: UTF-8
 
+require 'twivi'
 require 'json'
 
 module Twivi
@@ -31,6 +32,11 @@ class Worker
         http.start() do |http|
           # TODO 外からの中止
           http.request_get( path ) do |res|
+            # TODO res.code 200 のチェック
+            if res.code != '200'
+              Twivi.debug res.body
+              break
+            end
             res.read_body do |dat|
               break if @going_to_end
               @buf << dat

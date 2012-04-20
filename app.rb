@@ -107,13 +107,15 @@ class View
     form_win.setpos( 0, 0 )
     form_win.addstr( '入力蘭です' )
     form_win.refresh
-    #Thread.new do
-    #  100.times do
-    #    sleep 5
-    #    form_win.addstr( 'test' )
-    #    form_win.refresh
-    #  end
-    #end
+=begin
+    Thread.new do
+      100.times do
+        sleep 0.1
+        form_win.addstr( 't' )
+        form_win.refresh
+      end
+    end
+=end
 
     win.refresh
     @sub_win = sub_wind
@@ -124,6 +126,16 @@ class View
         sub_wind.scrl( 1 )
       when ?k
         sub_wind.scrl( -1 )
+      when ?i
+        while true
+          ch = form_win.getch #１文字入力。
+          case ch
+          when ?q
+            break
+          else
+            form_win.addstr( ch.to_s )
+          end
+        end
       when ?q
         break
       when 'あ'
@@ -163,7 +175,6 @@ class App
     @data_manager = DataManager.new
     @worker = Twivi::Worker.new( @data_manager, credentials_json )
     @view   = View.new( @data_manager )
-
   end
 
   def finalize
